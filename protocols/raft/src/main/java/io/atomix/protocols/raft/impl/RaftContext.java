@@ -100,7 +100,6 @@ public class RaftContext implements AutoCloseable {
   @SuppressWarnings("unchecked")
   public RaftContext(
       String name,
-      RaftMember.Type type,
       MemberId localMemberId,
       RaftServerProtocol protocol,
       RaftStorage storage,
@@ -131,7 +130,7 @@ public class RaftContext implements AutoCloseable {
     // Reset the log/state machine.
     reset();
 
-    this.cluster = new RaftClusterContext(type, localMemberId, this);
+    this.cluster = new RaftClusterContext(localMemberId, this);
 
     // Register protocol listeners.
     registerHandlers(protocol);

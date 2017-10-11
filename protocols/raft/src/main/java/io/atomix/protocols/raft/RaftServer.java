@@ -44,7 +44,8 @@ import static com.google.common.base.Preconditions.checkNotNull;
  * for other members in the cluster.
  * <h2>State machines</h2>
  * Underlying each server is a {@link RaftService}. The state machine is responsible for maintaining the state with
- * relation to {@link io.atomix.protocols.raft.RaftCommand}s and {@link io.atomix.protocols.raft.RaftQuery}s submitted
+ * relation to {@link io.atomix.protocols.raft.operation.OperationType#COMMAND}s and
+ * {@link io.atomix.protocols.raft.operation.OperationType#QUERY}s submitted
  * to the server by a client. State machines are provided in a factory to allow servers to transition between stateful
  * and stateless states.
  * <pre>
@@ -57,13 +58,13 @@ import static com.google.common.base.Preconditions.checkNotNull;
  *     .build();
  *   }
  * </pre>
- * Server state machines are responsible for registering {@link io.atomix.protocols.raft.RaftCommand}s which can be
- * submitted to the cluster. Raft relies upon determinism to ensure consistency throughout the cluster, so <em>it is
+ * Server state machines are responsible for registering {@link io.atomix.protocols.raft.operation.OperationType#COMMAND}s
+ * which can be submitted to the cluster. Raft relies upon determinism to ensure consistency throughout the cluster, so <em>it is
  * imperative that each server in a cluster have the same state machine with the same commands.</em> State machines are
  * provided to the server as a {@link Supplier factory} to allow servers to {@link RaftMember#promote(RaftMember.Type) transition}
  * between stateful and stateless states.
  * <h2>Storage</h2>
- * As {@link io.atomix.protocols.raft.RaftCommand}s are received by the server, they're written to the Raft
+ * As {@link io.atomix.protocols.raft.operation.OperationType#COMMAND}s are received by the server, they're written to the Raft
  * {@link RaftLog} and replicated to other members
  * of the cluster. By default, the log is stored on disk, but users can override the default {@link RaftStorage} configuration
  * via {@link RaftServer.Builder#withStorage(RaftStorage)}. Most notably, to configure the storage module to store entries in
@@ -132,25 +133,6 @@ import static com.google.common.base.Preconditions.checkNotNull;
  *     future.thenRun(() -> {
  *       System.out.println("Server joined successfully!");
  *     });
- *   }
- * </pre>
- * <h2>Server types</h2>
- * Servers form new clusters and join existing clusters as active Raft voting members by default. However, for
- * large deployments Raft also supports alternative types of nodes which are configured by setting the server
- * {@link RaftMember.Type}. For example, the {@link RaftMember.Type#PASSIVE PASSIVE} server type does not participate
- * directly in the Raft consensus algorithm and instead receives state changes via an asynchronous gossip protocol.
- * This allows passive members to scale sequential reads beyond the typical three- or five-node Raft cluster. The
- * {@link RaftMember.Type#RESERVE RESERVE} server type is a stateless server that can act as a standby to the stateful
- * servers in the cluster, being {@link RaftMember#promote(RaftMember.Type) promoted} to a stateful state when necessary.
- * <p>
- * Server types are defined in the server builder simply by passing the initial {@link RaftMember.Type} to the
- * {@link Builder#withType(RaftMember.Type)} setter:
- * <pre>
- *   {@code
- *   RaftServer server = RaftServer.builder(address)
- *     .withType(Member.Type.PASSIVE)
- *     .withTransport(new NettyTransport())
- *     .build();
  *   }
  * </pre>
  *
@@ -407,6 +389,22 @@ public interface RaftServer {
   CompletableFuture<RaftServer> bootstrap(Collection<MemberId> cluster);
 
   /**
+   * Joins the cluster as a passive listener.
+   *
+   * @param cluster A collection of cluster member addresses to join.
+   * @return A completable future to be completed once the local server has joined the cluster.
+   */
+  CompletableFuture<RaftServer> listen(MemberId... cluster);
+
+  /**
+   * Joins the cluster as a passive listener.
+   *
+   * @param cluster A collection of cluster member addresses to join.
+   * @return A completable future to be completed once the local server has joined the cluster.
+   */
+  CompletableFuture<RaftServer> listen(Collection<MemberId> cluster);
+
+  /**
    * Joins the cluster.
    * <p>
    * Joining the cluster results in the local server being added to an existing cluster that has already been
@@ -538,7 +536,6 @@ public interface RaftServer {
     private static final int DEFAULT_THREAD_POOL_SIZE = Runtime.getRuntime().availableProcessors();
 
     protected String name;
-    protected RaftMember.Type type = RaftMember.Type.ACTIVE;
     protected MemberId localMemberId;
     protected RaftServerProtocol protocol;
     protected RaftStorage storage;
@@ -563,17 +560,6 @@ public interface RaftServer {
      */
     public Builder withName(String name) {
       this.name = checkNotNull(name, "name cannot be null");
-      return this;
-    }
-
-    /**
-     * Sets the initial server member type.
-     *
-     * @param type The initial server member type.
-     * @return The server builder.
-     */
-    public Builder withType(RaftMember.Type type) {
-      this.type = checkNotNull(type, "type cannot be null");
       return this;
     }
 

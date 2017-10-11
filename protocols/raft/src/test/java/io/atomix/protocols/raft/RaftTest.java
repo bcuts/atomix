@@ -74,7 +74,6 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -111,7 +110,7 @@ public class RaftTest extends ConcurrentTestCase {
   private static final Serializer clientSerializer = Serializer.using(KryoNamespace.DEFAULT);
 
   protected volatile int nextId;
-  protected volatile List<RaftMember> members;
+  protected volatile List<MemberId> members;
   protected volatile List<RaftClient> clients = new ArrayList<>();
   protected volatile List<RaftServer> servers = new ArrayList<>();
   protected volatile TestRaftProtocolFactory protocolFactory;
@@ -145,10 +144,10 @@ public class RaftTest extends ConcurrentTestCase {
     RaftServer server = createServers(1).get(0);
     server.bootstrap().thenRun(this::resume);
     await(5000);
-    RaftServer joiner1 = createServer(nextMember(RaftMember.Type.ACTIVE));
+    RaftServer joiner1 = createServer(nextMemberId());
     joiner1.join(server.cluster().getMember().memberId()).thenRun(this::resume);
     await(5000);
-    RaftServer joiner2 = createServer(nextMember(RaftMember.Type.ACTIVE));
+    RaftServer joiner2 = createServer(nextMemberId());
     joiner2.join(server.cluster().getMember().memberId()).thenRun(this::resume);
     await(5000);
   }
@@ -158,7 +157,7 @@ public class RaftTest extends ConcurrentTestCase {
    */
   @Test
   public void testActiveJoinLate() throws Throwable {
-    testServerJoinLate(RaftMember.Type.ACTIVE, RaftServer.Role.FOLLOWER);
+    testServerJoinLate(RaftServer.Role.FOLLOWER);
   }
 
   /**
@@ -166,32 +165,24 @@ public class RaftTest extends ConcurrentTestCase {
    */
   @Test
   public void testPassiveJoinLate() throws Throwable {
-    testServerJoinLate(RaftMember.Type.PASSIVE, RaftServer.Role.PASSIVE);
+    testServerJoinLate(RaftServer.Role.PASSIVE);
   }
 
   /**
    * Tests joining a server after many entries have been committed.
    */
-  @Test
-  public void testReserveJoinLate() throws Throwable {
-    testServerJoinLate(RaftMember.Type.RESERVE, RaftServer.Role.RESERVE);
-  }
-
-  /**
-   * Tests joining a server after many entries have been committed.
-   */
-  private void testServerJoinLate(RaftMember.Type type, RaftServer.Role role) throws Throwable {
+  private void testServerJoinLate(RaftServer.Role role) throws Throwable {
     createServers(3);
     RaftClient client = createClient();
     RaftProxy session = createSession(client);
     submit(session, 0, 100);
     await(10000);
-    RaftServer joiner = createServer(nextMember(type));
+    RaftServer joiner = createServer(nextMemberId());
     joiner.addRoleChangeListener(s -> {
       if (s == role)
         resume();
     });
-    joiner.join(members.stream().map(RaftMember::memberId).collect(Collectors.toList())).thenRun(this::resume);
+    joiner.join(members).thenRun(this::resume);
     await(10000, 2);
     submit(session, 0, 10);
     await(10000);
@@ -244,7 +235,7 @@ public class RaftTest extends ConcurrentTestCase {
     Thread.sleep(15000);
     servers.get(0).shutdown().get(10, TimeUnit.SECONDS);
     RaftServer server = createServer(members.get(0));
-    server.join(members.stream().map(RaftMember::memberId).collect(Collectors.toList())).thenRun(this::resume);
+    server.join(members).thenRun(this::resume);
     await(30000);
     submit(session, 0, 100);
     await(30000);
@@ -288,33 +279,21 @@ public class RaftTest extends ConcurrentTestCase {
    * Tests an active member joining the cluster.
    */
   @Test
-  public void testActiveJoin() throws Throwable {
-    testServerJoin(RaftMember.Type.ACTIVE);
+  public void testServerJoin() throws Throwable {
+    createServers(3);
+    RaftServer server = createServer(nextMemberId());
+    server.join(members).thenRun(this::resume);
+    await(10000);
   }
 
   /**
    * Tests a passive member joining the cluster.
    */
   @Test
-  public void testPassiveJoin() throws Throwable {
-    testServerJoin(RaftMember.Type.PASSIVE);
-  }
-
-  /**
-   * Tests a reserve member joining the cluster.
-   */
-  @Test
-  public void testReserveJoin() throws Throwable {
-    testServerJoin(RaftMember.Type.RESERVE);
-  }
-
-  /**
-   * Tests a server joining the cluster.
-   */
-  private void testServerJoin(RaftMember.Type type) throws Throwable {
+  public void testServerListen() throws Throwable {
     createServers(3);
-    RaftServer server = createServer(nextMember(type));
-    server.join(members.stream().map(RaftMember::memberId).collect(Collectors.toList())).thenRun(this::resume);
+    RaftServer server = createServer(nextMemberId());
+    server.listen(members).thenRun(this::resume);
     await(10000);
   }
 
@@ -324,8 +303,8 @@ public class RaftTest extends ConcurrentTestCase {
   @Test
   public void testResize() throws Throwable {
     RaftServer server = createServers(1).get(0);
-    RaftServer joiner = createServer(nextMember(RaftMember.Type.ACTIVE));
-    joiner.join(members.stream().map(RaftMember::memberId).collect(Collectors.toList())).thenRun(this::resume);
+    RaftServer joiner = createServer(nextMemberId());
+    joiner.join(members).thenRun(this::resume);
     await(10000);
     server.leave().thenRun(this::resume);
     await(10000);
@@ -336,45 +315,20 @@ public class RaftTest extends ConcurrentTestCase {
    * Tests an active member join event.
    */
   @Test
-  public void testActiveJoinEvent() throws Throwable {
-    testJoinEvent(RaftMember.Type.ACTIVE);
-  }
+  public void testJoinEvent() throws Throwable {List<RaftServer> servers = createServers(3);
 
-  /**
-   * Tests a passive member join event.
-   */
-  @Test
-  public void testPassiveJoinEvent() throws Throwable {
-    testJoinEvent(RaftMember.Type.PASSIVE);
-  }
-
-  /**
-   * Tests a reserve member join event.
-   */
-  @Test
-  public void testReserveJoinEvent() throws Throwable {
-    testJoinEvent(RaftMember.Type.RESERVE);
-  }
-
-  /**
-   * Tests a member join event.
-   */
-  private void testJoinEvent(RaftMember.Type type) throws Throwable {
-    List<RaftServer> servers = createServers(3);
-
-    RaftMember member = nextMember(type);
+    MemberId member = nextMemberId();
 
     RaftServer server = servers.get(0);
     server.cluster().addListener(event -> {
       if (event.type() == RaftClusterEvent.Type.JOIN) {
-        threadAssertEquals(event.subject().memberId(), member.memberId());
-        threadAssertEquals(event.subject().getType(), type);
+        threadAssertEquals(event.subject().memberId(), member);
         resume();
       }
     });
 
     RaftServer joiner = createServer(member);
-    joiner.join(members.stream().map(RaftMember::memberId).collect(Collectors.toList())).thenRun(this::resume);
+    joiner.join(members).thenRun(this::resume);
     await(10000, 2);
   }
 
@@ -1155,28 +1109,18 @@ public class RaftTest extends ConcurrentTestCase {
   }
 
   /**
-   * Returns the next server address.
-   *
-   * @param type The startup member type.
-   * @return The next server address.
-   */
-  private RaftMember nextMember(RaftMember.Type type) {
-    return new TestMember(nextMemberId(), type);
-  }
-
-  /**
    * Creates a set of Raft servers.
    */
   private List<RaftServer> createServers(int nodes) throws Throwable {
     List<RaftServer> servers = new ArrayList<>();
 
     for (int i = 0; i < nodes; i++) {
-      members.add(nextMember(RaftMember.Type.ACTIVE));
+      members.add(nextMemberId());
     }
 
     for (int i = 0; i < nodes; i++) {
       RaftServer server = createServer(members.get(i));
-      server.bootstrap(members.stream().map(RaftMember::memberId).collect(Collectors.toList())).thenRun(this::resume);
+      server.bootstrap(members).thenRun(this::resume);
       servers.add(server);
     }
 
@@ -1192,12 +1136,12 @@ public class RaftTest extends ConcurrentTestCase {
     List<RaftServer> servers = new ArrayList<>();
 
     for (int i = 0; i < total; i++) {
-      members.add(nextMember(RaftMember.Type.ACTIVE));
+      members.add(nextMemberId());
     }
 
     for (int i = 0; i < live; i++) {
       RaftServer server = createServer(members.get(i));
-      server.bootstrap(members.stream().map(RaftMember::memberId).collect(Collectors.toList())).thenRun(this::resume);
+      server.bootstrap(members).thenRun(this::resume);
       servers.add(server);
     }
 
@@ -1209,13 +1153,12 @@ public class RaftTest extends ConcurrentTestCase {
   /**
    * Creates a Raft server.
    */
-  private RaftServer createServer(RaftMember member) {
-    RaftServer.Builder builder = RaftServer.newBuilder(member.memberId())
-        .withType(member.getType())
-        .withProtocol(protocolFactory.newServerProtocol(member.memberId()))
+  private RaftServer createServer(MemberId memberId) {
+    RaftServer.Builder builder = RaftServer.newBuilder(memberId)
+        .withProtocol(protocolFactory.newServerProtocol(memberId))
         .withStorage(RaftStorage.newBuilder()
             .withStorageLevel(StorageLevel.DISK)
-            .withDirectory(new File(String.format("target/test-logs/%s", member.memberId())))
+            .withDirectory(new File(String.format("target/test-logs/%s", memberId)))
             .withSerializer(storageSerializer)
             .withMaxSegmentSize(1024 * 10)
             .withMaxEntriesPerSegment(10)
@@ -1236,7 +1179,7 @@ public class RaftTest extends ConcurrentTestCase {
         .withMemberId(memberId)
         .withProtocol(protocolFactory.newClientProtocol(memberId))
         .build();
-    client.connect(members.stream().map(RaftMember::memberId).collect(Collectors.toList())).thenRun(this::resume);
+    client.connect(members).thenRun(this::resume);
     await(30000);
     clients.add(client);
     return client;

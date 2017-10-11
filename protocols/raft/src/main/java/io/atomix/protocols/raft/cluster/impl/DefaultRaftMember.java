@@ -78,6 +78,15 @@ public final class DefaultRaftMember implements RaftMember, AutoCloseable {
     return type;
   }
 
+  /**
+   * Sets the member type.
+   *
+   * @param type the member type
+   */
+  void setType(RaftMember.Type type) {
+    this.type = type;
+  }
+
   @Override
   public Instant getLastUpdated() {
     return updated;

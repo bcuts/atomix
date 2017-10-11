@@ -72,9 +72,9 @@ public final class RaftClusterContext implements RaftCluster, AutoCloseable {
   private volatile CompletableFuture<Void> leaveFuture;
   private final Set<RaftClusterEventListener> listeners = new CopyOnWriteArraySet<>();
 
-  public RaftClusterContext(RaftMember.Type type, MemberId localMemberId, RaftContext raft) {
+  public RaftClusterContext(MemberId localMemberId, RaftContext raft) {
     Instant time = Instant.now();
-    this.member = new DefaultRaftMember(localMemberId, type, time).setCluster(this);
+    this.member = new DefaultRaftMember(localMemberId, RaftMember.Type.PASSIVE, time).setCluster(this);
     this.raft = checkNotNull(raft, "context cannot be null");
     this.log = ContextualLoggerFactory.getLogger(getClass(), LoggerContext.builder(RaftServer.class)
         .addValue(raft.getName())
@@ -304,21 +304,19 @@ public final class RaftClusterContext implements RaftCluster, AutoCloseable {
       return joinFuture;
 
     if (configuration == null) {
-      if (member.getType() != RaftMember.Type.ACTIVE) {
-        return Futures.exceptionalFuture(new IllegalStateException("only ACTIVE members can bootstrap the cluster"));
-      } else {
-        // Create a set of active members.
-        Set<RaftMember> activeMembers = cluster.stream()
-            .filter(m -> !m.equals(member.memberId()))
-            .map(m -> new DefaultRaftMember(m, RaftMember.Type.ACTIVE, member.getLastUpdated()))
-            .collect(Collectors.toSet());
+      member.setType(RaftMember.Type.ACTIVE);
 
-        // Add the local member to the set of active members.
-        activeMembers.add(member);
+      // Create a set of active members.
+      Set<RaftMember> activeMembers = cluster.stream()
+          .filter(m -> !m.equals(member.memberId()))
+          .map(m -> new DefaultRaftMember(m, RaftMember.Type.ACTIVE, member.getLastUpdated()))
+          .collect(Collectors.toSet());
 
-        // Create a new configuration and store it on disk to ensure the cluster can fall back to the configuration.
-        configure(new Configuration(0, 0, member.getLastUpdated().toEpochMilli(), activeMembers));
-      }
+      // Add the local member to the set of active members.
+      activeMembers.add(member);
+
+      // Create a new configuration and store it on disk to ensure the cluster can fall back to the configuration.
+      configure(new Configuration(0, 0, member.getLastUpdated().toEpochMilli(), activeMembers));
     }
     return join();
   }
@@ -330,6 +328,8 @@ public final class RaftClusterContext implements RaftCluster, AutoCloseable {
 
     // If no configuration was loaded from disk, create a new configuration.
     if (configuration == null) {
+      member.setType(RaftMember.Type.PASSIVE);
+
       // Create a set of cluster members, excluding the local member which is joining a cluster.
       Set<RaftMember> activeMembers = cluster.stream()
           .filter(m -> !m.equals(member.memberId()))
